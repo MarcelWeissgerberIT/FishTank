@@ -48,6 +48,9 @@ npm run build    # Produktions-Build nach dist/
 Gebaut mit [three.js](https://threejs.org) und [Vite](https://vite.dev). Jeder Push auf `main` baut die Seite per
 GitHub Actions und veröffentlicht sie auf dem Branch `gh-pages` (GitHub Pages).
 
+**Einmalig nötig:** *Settings → Pages → Build and deployment → Source: „Deploy from a branch“ →
+Branch `gh-pages` / `(root)` → Save.* Danach ist die Seite unter der Live-URL erreichbar.
+
 ## Assets
 
 Alle Fische, Haie, Korallen, Steine, Wurzeln, Texturen und Hintergründe wurden mit **Higgsfield** erzeugt
