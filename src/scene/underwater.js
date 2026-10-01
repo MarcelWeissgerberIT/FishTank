@@ -111,7 +111,7 @@ ${sway ? SWAY_HEAD : ''}`
 {
   float e = 0.01;
   float dl = (swimDeform(position + vec3(0.0, 0.0, e)).x - swimDeform(position - vec3(0.0, 0.0, e)).x) / (2.0 * e);
-  objectNormal = normalize(vec3(objectNormal.x, objectNormal.y, objectNormal.z - dl * objectNormal.x));
+  objectNormal = normalize(vec3(objectNormal.x, objectNormal.y + 1e-5, objectNormal.z - dl * objectNormal.x));
 }`
       );
       vs = vs.replace('#include <begin_vertex>', `#include <begin_vertex>\ntransformed = swimDeform(transformed);`);
@@ -161,7 +161,7 @@ ${UW_GLSL}`
       '#include <lights_fragment_end>',
       `#include <lights_fragment_end>
 {
-  float uwUp = clamp(normalize(vUwNormal).y * 0.5 + 0.5, 0.0, 1.0);
+  float uwUp = clamp(normalize(vUwNormal + vec3(0.0, 1e-4, 0.0)).y * 0.5 + 0.5, 0.0, 1.0);
   reflectedLight.indirectDiffuse += diffuseColor.rgb * mix(uAmbBottom, uAmbTop, uwUp);
 }`
     );

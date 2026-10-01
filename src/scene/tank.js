@@ -5,6 +5,7 @@ import { UW, UW_GLSL } from './underwater.js';
 
 const EQUIRECT_GLSL = /* glsl */ `
 vec2 equirectUv(vec3 d) {
+  if (abs(d.x) + abs(d.z) < 1e-5) d.x = 1e-5;
   return vec2(atan(d.z, d.x) * 0.15915494 + 0.5, asin(clamp(d.y, -1.0, 1.0)) * 0.31830989 + 0.5);
 }`;
 
@@ -13,7 +14,7 @@ uniform sampler2D uMap; uniform int uMode; uniform float uBright; uniform vec3 u
 vec3 backdropColor(vec2 uv) {
   if (uMode == 0) return texture2D(uMap, uv).rgb * uBright * mix(vec3(1.0), uLightColor, 0.35);
   if (uMode == 1) {
-    float g = pow(1.0 - uv.y, 1.6);
+    float g = pow(clamp(1.0 - uv.y, 0.0, 1.0), 1.6);
     return mix(vec3(0.55, 0.75, 0.9), vec3(1.0, 1.0, 0.98), g) * (0.25 + 0.9 * g) * uBright * mix(vec3(1.0), uLightColor, 0.5);
   }
   return vec3(0.004, 0.006, 0.01);

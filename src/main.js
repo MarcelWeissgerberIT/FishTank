@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 import { TANK, INNER, IS_MOBILE, asset } from './config.js';
 import { UW } from './scene/underwater.js';
@@ -81,6 +82,11 @@ class App {
     renderer.toneMappingExposure = 1.05;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
+    renderer.debug.onShaderError = (gl, program, vs, fs) => {
+      const log = (gl.getShaderInfoLog(fs) || gl.getShaderInfoLog(vs) || gl.getProgramInfoLog(program) || '').trim();
+      console.error('Shader error:', log);
+      this.ui?.hint('Shader-Fehler: ' + log.split('\n')[0].slice(0, 120), 8000);
+    };
 
     const scene = (this.scene = new THREE.Scene());
     scene.background = new THREE.Color(0x050608);
@@ -150,9 +156,29 @@ class App {
 
     // ---------- post processing
     const size = renderer.getDrawingBufferSize(new THREE.Vector2());
-    const rt = new THREE.WebGLRenderTarget(size.x, size.y, { type: THREE.HalfFloatType, samples: IS_MOBILE ? 2 : 4 });
+    const ext = renderer.extensions;
+    const floatOk = ext.has('EXT_color_buffer_float') || ext.has('EXT_color_buffer_half_float');
+    const rt = new THREE.WebGLRenderTarget(size.x, size.y, {
+      type: floatOk ? THREE.HalfFloatType : THREE.UnsignedByteType,
+      samples: IS_MOBILE ? 2 : 4,
+    });
     this.composer = new EffectComposer(renderer, rt);
     this.composer.addPass(new RenderPass(scene, camera));
+    // A single NaN/Inf pixel (driver-specific maths) would be smeared over the
+    // whole screen by the bloom blur – scrub them before bloom.
+    this.composer.addPass(
+      new ShaderPass({
+        uniforms: { tDiffuse: { value: null } },
+        vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+        fragmentShader: `
+          uniform sampler2D tDiffuse; varying vec2 vUv;
+          void main() {
+            vec4 c = texture2D(tDiffuse, vUv);
+            if (any(isnan(c)) || any(isinf(c)) || !(c.r + c.g + c.b >= 0.0)) c = vec4(0.0, 0.0, 0.0, 1.0);
+            gl_FragColor = vec4(min(c.rgb, vec3(16.0)), c.a);
+          }`,
+      })
+    );
     this.bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.35, 0.55, 0.82);
     this.composer.addPass(this.bloom);
     this.composer.addPass(new OutputPass());
@@ -179,7 +205,7 @@ class App {
     const m = new THREE.ShaderMaterial({
       side: THREE.BackSide,
       vertexShader: `varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-      fragmentShader: `varying vec3 vP; void main(){ float y = vP.y; vec3 top = vec3(1.4,1.45,1.5); vec3 mid = vec3(0.25,0.32,0.38); vec3 bot = vec3(0.12,0.1,0.08); vec3 c = y > 0.0 ? mix(mid, top, pow(y, 0.7)) : mix(mid, bot, pow(-y, 0.6)); gl_FragColor = vec4(c, 1.0); }`,
+      fragmentShader: `varying vec3 vP; void main(){ float y = vP.y; vec3 top = vec3(1.4,1.45,1.5); vec3 mid = vec3(0.25,0.32,0.38); vec3 bot = vec3(0.12,0.1,0.08); vec3 c = y > 0.0 ? mix(mid, top, pow(max(y, 0.0), 0.7)) : mix(mid, bot, pow(max(-y, 0.0), 0.6)); gl_FragColor = vec4(c, 1.0); }`,
     });
     s.add(new THREE.Mesh(new THREE.SphereGeometry(10, 32, 16), m));
     const pm = new THREE.PMREMGenerator(this.renderer);
@@ -584,6 +610,33 @@ class App {
     }
   }
 
+  // If the frame comes out completely black (broken driver maths), fall back
+  // step by step to simpler rendering instead of showing nothing.
+  watchdog() {
+    const t = performance.now() / 1000;
+    const w = (this.wd ??= { next: t + 2.5, step: 0 });
+    if (t < w.next || w.step > 3) return;
+    w.next = t + 2;
+    const gl = this.renderer.getContext();
+    const px = new Uint8Array(4);
+    let lit = 0;
+    for (let i = 1; i < 6; i++)
+      for (let j = 1; j < 6; j++) {
+        gl.readPixels(Math.floor((gl.drawingBufferWidth * i) / 6), Math.floor((gl.drawingBufferHeight * j) / 6), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        if (px[0] + px[1] + px[2] > 0) lit++;
+      }
+    if (lit > 0) return;
+    w.step++;
+    console.warn('FishTank: black frame detected, fallback step', w.step);
+    if (w.step === 1) this.set('bloom', false);
+    else if (w.step === 2) this.set('rays', false);
+    else if (w.step === 3) {
+      this.set('caustics', false);
+      this.set('particles', false);
+    }
+    this.ui.hint('Kompatibilitätsmodus für deine Grafikkarte aktiviert', 4000);
+  }
+
   // ------------------------------------------------------------ main loop
   frame() {
     this.timer.update();
@@ -603,6 +656,7 @@ class App {
     this.rays.update(this.camera);
     this.ui.update?.(dt);
     this.composer.render(dt);
+    this.watchdog();
     this.adaptQuality(dt);
   }
 }

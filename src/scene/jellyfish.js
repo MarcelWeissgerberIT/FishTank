@@ -51,7 +51,7 @@ varying vec3 vN; varying vec3 vWp; varying vec2 vUv; varying float vAng;
 void main() {
   vec3 V = normalize(cameraPosition - vWp);
   vec3 N = normalize(vN);
-  float f = pow(1.0 - abs(dot(N, V)), 2.2);
+  float f = pow(clamp(1.0 - abs(dot(N, V)), 0.0, 1.0), 2.2);
   float h = uHue + uSpread * (f * 0.7 + vUv.y * 0.35) + uTime * 0.04;
   vec3 base = hsv2rgb(vec3(fract(h), uSat, 1.0));
   // radial canals + ring canal
@@ -96,7 +96,7 @@ varying float vS; varying float vPhase;
 void main() {
   float h = uHue + uSpread * (vS * 0.8 + vPhase * 0.05) + uTime * 0.05;
   vec3 col = hsv2rgb(vec3(fract(h), uSat, 1.0));
-  float spark = pow(0.5 + 0.5 * sin(vS * 60.0 - uTime * 6.0 + vPhase * 7.0), 8.0);
+  float spark = pow(clamp(0.5 + 0.5 * sin(vS * 60.0 - uTime * 6.0 + vPhase * 7.0), 0.0, 1.0), 8.0);
   float a = (1.0 - vS) * (0.35 + 0.65 * (1.0 - vS)) * uAlpha + spark * 0.3 * (1.0 - vS);
   gl_FragColor = vec4(col * a * uBright, 1.0);
 }`;

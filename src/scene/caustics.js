@@ -41,11 +41,16 @@ export class Caustics {
           for (int n = 0; n < 4; n++) {
             float t = time * (1.0 - (3.5 / float(n + 1)));
             i = p + vec2(cos(t - i.x) + sin(t + i.y), sin(t - i.y) + cos(t + i.x));
-            c += 1.0 / length(vec2(p.x / (sin(i.x + t) / inten), p.y / (cos(i.y + t) / inten)));
+            // == 1 / length(p / (vec2(sin, cos) / inten)), written without divisions by ~0
+            float s1 = sin(i.x + t);
+            float s2 = cos(i.y + t);
+            float A = p.x * inten;
+            float B = p.y * inten;
+            c += abs(s1 * s2) / sqrt(A * A * s2 * s2 + B * B * s1 * s1 + 1e-12);
           }
           c /= 4.0;
-          c = 1.17 - pow(c, 1.4);
-          return pow(abs(c), 8.0);
+          c = 1.17 - pow(max(c, 0.0), 1.4);
+          return min(pow(abs(c), 8.0), 40.0);
         }
         float layered(vec2 uv, float t) {
           return 0.65 * caustic(uv, t) + 0.45 * caustic(uv * 1.37 + vec2(0.31, 0.17), t * 0.83 + 3.0);
@@ -59,7 +64,7 @@ export class Caustics {
           float off = 0.012;
           vec3 c = vec3(layered(cuv + vec2(off, 0.0), t), layered(cuv, t), layered(cuv - vec2(off, 0.0), t));
           vec3 col = mix(vec3(1.0), 0.42 + c * 2.1, uAmount);
-          gl_FragColor = vec4(col * m, 1.0);
+          gl_FragColor = vec4(clamp(col * m, 0.0, 12.0), 1.0);
         }`,
       depthTest: false,
       depthWrite: false,

@@ -243,8 +243,9 @@ export class GodRays {
           uniform vec3 uColor; uniform float uIntensity; uniform float uTime; uniform float uPhase;
           varying vec2 vUv;
           void main() {
-            float across = exp(-pow((vUv.x - 0.5) * 2.4, 2.0) * 2.5);
-            float along = pow(vUv.y, 1.6);
+            float ax = (vUv.x - 0.5) * 2.4;
+            float across = exp(-ax * ax * 2.5);
+            float along = pow(clamp(vUv.y, 0.0, 1.0), 1.6);
             float streak = 0.55 + 0.45 * sin(vUv.x * 23.0 + uTime * 0.5 + uPhase * 5.0);
             float flick = 0.5 + 0.5 * sin(uTime * 0.9 + uPhase) * sin(uTime * 0.31 + uPhase * 1.7);
             float edge = smoothstep(0.0, 0.08, vUv.y);
