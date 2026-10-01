@@ -7,13 +7,15 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: true
 
 jobs:
-  build-and-deploy:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,6 +28,7 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      # Pages source "Deploy from a branch" (gh-pages)
       - name: Publish dist/ to the gh-pages branch
         uses: peaceiris/actions-gh-pages@v4
         with:
@@ -33,3 +36,18 @@ jobs:
           publish_dir: ./dist
           force_orphan: true
           commit_message: 'deploy: ${{ github.sha }}'
+
+      # Pages source "GitHub Actions"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
