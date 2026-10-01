@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#04070b" />
+    <meta name="description" content="Immersives 3D-Aquarium im Browser – mit echten 3D-Fischen, Haien, leuchtenden Quallen, Kaustik-Licht und Presets." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐠</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet" />
+    <title>FishTank – 3D Aquarium</title>
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <canvas id="scene"></canvas>
+    <div id="ui"></div>
+    <div id="loader">
+      <div class="loader-inner">
+        <div class="loader-fish">🐠</div>
+        <div class="loader-title">FishTank</div>
+        <div id="load-text">Aquarium wird befüllt …</div>
+        <div class="load-track"><div id="load-bar"></div></div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
