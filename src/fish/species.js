@@ -11,13 +11,13 @@ export const SPECIES = [
   },
   {
     id: 'bluetang', name: 'Paletten-Doktorfisch', latin: 'Paracanthurus hepatus', water: 'salt', group: 'fish',
-    length: 0.17, speed: [0.07, 0.2], zone: [0.3, 0.85], behavior: 'cruise', school: 0.2, agility: 2.6,
+    length: 0.17, speed: [0.07, 0.2], zone: [0.3, 0.85], behavior: 'cruise', school: 0.2, agility: 2.6, maxPitch: 0.35,
     swim: { amp: 0.06, wave: 3.4, stiff: 0.1, base: 3, k: 5 },
     desc: 'Ausdauernder Schwimmer, der ständig das Becken patrouilliert. Bekannt als „Dorie“.',
   },
   {
     id: 'yellowtang', name: 'Gelber Segelflossendoktor', latin: 'Zebrasoma flavescens', water: 'salt', group: 'fish',
-    length: 0.14, speed: [0.06, 0.18], zone: [0.25, 0.8], behavior: 'cruise', school: 0.35, agility: 2.8,
+    length: 0.14, speed: [0.06, 0.18], zone: [0.25, 0.8], behavior: 'cruise', school: 0.35, agility: 2.8, maxPitch: 0.35,
     swim: { amp: 0.06, wave: 3.2, stiff: 0.12, base: 3, k: 5 },
     desc: 'Leuchtend gelber Algenfresser aus Hawaii, grast unermüdlich die Steine ab.',
   },
@@ -29,7 +29,7 @@ export const SPECIES = [
   },
   {
     id: 'moorish', name: 'Halfterfisch', latin: 'Zanclus cornutus', water: 'salt', group: 'fish',
-    length: 0.17, speed: [0.06, 0.16], zone: [0.35, 0.9], behavior: 'cruise', school: 0.3, agility: 2.4,
+    length: 0.17, speed: [0.06, 0.16], zone: [0.35, 0.9], behavior: 'cruise', school: 0.3, agility: 2.4, maxPitch: 0.35,
     swim: { amp: 0.05, wave: 3.0, stiff: 0.12, base: 3, k: 4 },
     desc: 'Mit seinem langen Rückenflossen-Wimpel ein elegantes Symbol der Korallenriffe.',
   },
@@ -83,19 +83,19 @@ export const SPECIES = [
   },
   {
     id: 'blacktip', name: 'Schwarzspitzen-Riffhai', latin: 'Carcharhinus melanopterus (Jungtier)', water: 'salt', group: 'shark',
-    length: 0.34, speed: [0.12, 0.28], zone: [0.25, 0.75], behavior: 'patrol', school: 0, agility: 1.8,
+    length: 0.3, speed: [0.09, 0.22], zone: [0.55, 0.85], behavior: 'patrol', school: 0, agility: 1.7, maxPitch: 0.14,
     swim: { amp: 0.11, wave: 3.4, stiff: 0.04, base: 1.5, k: 5 },
     desc: 'Kleiner Riffhai, der nie stillsteht: Er muss schwimmen, damit Wasser durch seine Kiemen strömt.',
   },
   {
     id: 'epaulette', name: 'Epaulettenhai', latin: 'Hemiscyllium ocellatum', water: 'salt', group: 'shark',
-    length: 0.3, speed: [0.03, 0.12], zone: [0.0, 0.12], behavior: 'walker', school: 0, agility: 2.0,
+    length: 0.28, speed: [0.03, 0.1], zone: [0.0, 0.12], behavior: 'walker', school: 0, agility: 2.0, maxPitch: 0.2,
     swim: { amp: 0.14, wave: 3.8, stiff: 0.06, base: 1.2, k: 5 },
     desc: 'Kann mit seinen Flossen über den Boden „laufen“ – sogar kurz an Land zwischen Gezeitentümpeln.',
   },
   {
     id: 'bala', name: 'Bala-Hai', latin: 'Balantiocheilos melanopterus', water: 'fresh', group: 'shark',
-    length: 0.16, speed: [0.08, 0.22], zone: [0.3, 0.8], behavior: 'cruise', school: 0.6, agility: 2.6,
+    length: 0.16, speed: [0.08, 0.22], zone: [0.3, 0.8], behavior: 'cruise', school: 0.6, agility: 2.6, maxPitch: 0.3,
     swim: { amp: 0.07, wave: 3.4, stiff: 0.1, base: 3, k: 5 },
     desc: 'Kein echter Hai, sondern eine Barbe – sieht aber mit ihrer Rückenflosse genau so aus.',
   },

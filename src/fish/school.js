@@ -12,6 +12,7 @@ const tmpQ = new THREE.Quaternion();
 const tmpE = new THREE.Euler();
 const tmpM = new THREE.Matrix4();
 const tmpS = new THREE.Vector3();
+const tmpG = new THREE.Vector3();
 
 function wrapAngle(a) {
   while (a > Math.PI) a -= Math.PI * 2;
@@ -275,6 +276,202 @@ export class FishManager {
     f.goal.y = clamp(f.goal.y, gb.minY, gb.maxY);
   }
 
+  freeSwim(f, dt, t) {
+    const sp = f.sp;
+    const cruise = sp.speed[0];
+    const burst = sp.speed[1];
+    const steer = tmpV2.set(0, 0, 0);
+
+    // ---- desired velocity
+    let goal = f.goal;
+    if (sp.behavior === 'school' && f.mode !== 'feed') {
+      const sg = this.schoolGoals.get(sp.id);
+      if (sg) goal = sg.goal;
+    }
+    const toGoal = tmpV.copy(goal).sub(f.pos);
+    const dist = toGoal.length();
+    let desiredSpeed = cruise;
+    if (f.mode === 'pause' || f.mode === 'rest') desiredSpeed = 0;
+    else if (f.mode === 'forage') desiredSpeed = cruise * 0.25;
+    else if (f.mode === 'feed') desiredSpeed = lerp(cruise, burst, 0.7);
+    else if (f.mode === 'surface') desiredSpeed = burst * 0.8;
+    if (sp.behavior === 'patrol') desiredSpeed = Math.max(desiredSpeed, cruise);
+    if (sp.behavior !== 'patrol' && f.mode !== 'feed') desiredSpeed *= Math.min(1, dist / 0.08);
+    // individual rhythm
+    desiredSpeed *= 0.85 + 0.3 * Math.sin(t * 0.7 + f.seed);
+
+    if (dist > 1e-4) toGoal.multiplyScalar(desiredSpeed / dist);
+    else toGoal.set(0, 0, 0);
+    if (f.mode === 'forage') {
+      toGoal.x += Math.sin(t * 2.1 + f.seed) * cruise * 0.4;
+      toGoal.z += Math.cos(t * 1.7 + f.seed) * cruise * 0.4;
+    }
+    steer.copy(toGoal).sub(f.vel).multiplyScalar(sp.agility * 0.9);
+
+    // ---- neighbours: separation + schooling
+    let ax = 0, ay = 0, az = 0, cx = 0, cy = 0, cz = 0, nn = 0;
+    const schoolR = sp.behavior === 'school' ? 0.2 : 0.22;
+    for (const o of this.fish) {
+      if (o === f) continue;
+      const dx = f.pos.x - o.pos.x;
+      const dy = f.pos.y - o.pos.y;
+      const dz = f.pos.z - o.pos.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const minD = (f.scale + o.scale) * 0.42;
+      if (d2 < minD * minD && d2 > 1e-8) {
+        const d = Math.sqrt(d2);
+        const k = ((minD - d) / minD) * cruise * 10;
+        steer.x += (dx / d) * k;
+        steer.y += (dy / d) * k * 0.6;
+        steer.z += (dz / d) * k;
+      }
+      if (sp.school > 0 && o.sp === sp && d2 < schoolR * schoolR) {
+        ax += o.vel.x; ay += o.vel.y; az += o.vel.z;
+        cx += o.pos.x; cy += o.pos.y; cz += o.pos.z;
+        nn++;
+      }
+    }
+    if (nn > 0 && f.mode !== 'feed') {
+      const s = sp.school;
+      const coh = sp.behavior === 'school' ? 3.2 : 1.4;
+      steer.x += (ax / nn - f.vel.x) * s * 1.8 + (cx / nn - f.pos.x) * s * coh;
+      steer.y += (ay / nn - f.vel.y) * s * 1.2 + (cy / nn - f.pos.y) * s * coh * 0.8;
+      steer.z += (az / nn - f.vel.z) * s * 1.8 + (cz / nn - f.pos.z) * s * coh;
+    }
+
+    // ---- walls (look-ahead)
+    const look = f.scale * 0.8 + f.vel.length() * 0.8;
+    const ahead = tmpV.copy(f.dir).multiplyScalar(look).add(f.pos);
+    const b = this.bounds(f, ahead.x, ahead.z);
+    const W = 10;
+    if (ahead.x < b.minX) steer.x += (b.minX - ahead.x) * W;
+    if (ahead.x > b.maxX) steer.x -= (ahead.x - b.maxX) * W;
+    if (ahead.z < b.minZ) steer.z += (b.minZ - ahead.z) * W;
+    if (ahead.z > b.maxZ) steer.z -= (ahead.z - b.maxZ) * W;
+    if (ahead.y < b.minY) steer.y += (b.minY - ahead.y) * W;
+    if (ahead.y > b.maxY) steer.y -= (ahead.y - b.maxY) * W;
+
+    // ---- obstacles (decor boxes)
+    const pad = f.scale * 0.35;
+    for (const o of this.obstacles) {
+      if (
+        ahead.x > o.min.x - pad && ahead.x < o.max.x + pad &&
+        ahead.y > o.min.y - pad && ahead.y < o.max.y + pad &&
+        ahead.z > o.min.z - pad && ahead.z < o.max.z + pad
+      ) {
+        const cxo = (o.min.x + o.max.x) / 2;
+        const czo = (o.min.z + o.max.z) / 2;
+        const px = ahead.x - cxo;
+        const pz = ahead.z - czo;
+        const up = o.max.y + pad - ahead.y;
+        const sideX = (o.max.x - o.min.x) / 2 + pad - Math.abs(px);
+        const sideZ = (o.max.z - o.min.z) / 2 + pad - Math.abs(pz);
+        if (up < sideX && up < sideZ && o.max.y < INNER.maxY - 0.08) steer.y += up * W * 1.2;
+        else if (sideX < sideZ) steer.x += Math.sign(px || 1) * sideX * W;
+        else steer.z += Math.sign(pz || 1) * sideZ * W;
+      }
+    }
+
+    // ---- fleeing
+    let maxSpeed = burst;
+    if (f.flee > 0) {
+      steer.addScaledVector(f.fleeDir, burst * 9 * f.flee);
+      f.flee -= dt;
+      maxSpeed = burst * 1.5;
+    }
+
+    // integrate
+    const maxAcc = burst * sp.agility * 2.5;
+    if (steer.length() > maxAcc) steer.setLength(maxAcc);
+    f.vel.addScaledVector(steer, dt);
+    if (sp.behavior === 'walker' && (f.mode === 'rest' || f.mode === 'pause')) f.vel.multiplyScalar(Math.exp(-dt * 3));
+    const speed = f.vel.length();
+    if (speed > maxSpeed) f.vel.multiplyScalar(maxSpeed / speed);
+    // fish swim mostly level: limit climb/dive relative to forward speed
+    const maxPitch = f.mode === 'surface' ? 1.2 : sp.maxPitch ?? 0.45;
+    const vh = Math.hypot(f.vel.x, f.vel.z);
+    const vyMax = Math.tan(maxPitch) * Math.max(vh, cruise * 0.3);
+    f.vel.y = clamp(f.vel.y, -vyMax, vyMax);
+    f.pos.addScaledVector(f.vel, dt);
+
+    // hard limits
+    const hb = this.bounds(f, f.pos.x, f.pos.z);
+    const hard = (v, lo, hi, axis) => {
+      if (v < lo) {
+        f.vel[axis] = Math.abs(f.vel[axis]) * 0.3;
+        return lo;
+      }
+      if (v > hi) {
+        f.vel[axis] = -Math.abs(f.vel[axis]) * 0.3;
+        return hi;
+      }
+      return v;
+    };
+    f.pos.x = hard(f.pos.x, hb.minX - 0.02, hb.maxX + 0.02, 'x');
+    f.pos.z = hard(f.pos.z, hb.minZ - 0.02, hb.maxZ + 0.02, 'z');
+    f.pos.y = hard(f.pos.y, hb.minY - 0.004, hb.maxY + 0.01, 'y');
+    const inside = this.insideObstacle(f.pos, -0.002);
+    if (inside) {
+      // push out to the top of the obstacle
+      f.pos.y += (inside.max.y - f.pos.y) * Math.min(1, dt * 4);
+    }
+  }
+
+  // Smooth lap following with a limited turn rate (no wall braking).
+  patrolMove(f, dt, t) {
+    const sp = f.sp;
+    const target = this.patrolTarget(f, dt);
+    if (f.pyaw == null) f.pyaw = Math.atan2(f.dir.x, f.dir.z);
+    const d = wrapAngle(Math.atan2(target.x - f.pos.x, target.z - f.pos.z) - f.pyaw);
+    const maxTurn = 1.0 + 0.25 * Math.sin(t * 0.3 + f.seed);
+    f.pyaw = wrapAngle(f.pyaw + clamp(d, -maxTurn * dt, maxTurn * dt));
+    const v = sp.speed[0] * (0.9 + 0.2 * Math.sin(t * 0.35 + f.seed)) * (1 - 0.25 * Math.min(1, Math.abs(d)));
+    let vy = clamp((target.y - f.pos.y) * 0.4, -0.006, 0.006);
+    // two sharks on crossing laps pass above/below each other
+    for (const o of this.fish) {
+      if (o === f || o.sp.group !== 'shark') continue;
+      const dx = o.pos.x - f.pos.x;
+      const dz = o.pos.z - f.pos.z;
+      const dy = f.pos.y - o.pos.y;
+      if (dx * dx + dz * dz < 0.09 && Math.abs(dy) < 0.08) vy += Math.sign(dy || f.seed - 50) * 0.01;
+    }
+    f.vel.set(Math.sin(f.pyaw) * v, clamp(vy, -0.015, 0.015), Math.cos(f.pyaw) * v);
+    f.pos.addScaledVector(f.vel, dt);
+    const b = this.bounds(f, f.pos.x, f.pos.z);
+    f.pos.set(clamp(f.pos.x, b.minX, b.maxX), clamp(f.pos.y, b.minY, b.maxY), clamp(f.pos.z, b.minZ, b.maxZ));
+  }
+
+  // Sharks cruise smooth, nearly level laps on an oval around the tank and
+  // only now and then change depth or direction.
+  patrolTarget(f, dt) {
+    const sp = f.sp;
+    const rx = Math.max(0.12, INNER.maxX - sp.length * 0.85 - 0.04);
+    const rz = Math.max(0.05, INNER.maxZ - Math.min(sp.length * 0.55, 0.12) - 0.03);
+    const cz = -0.01;
+    const pickY = () => {
+      // stay above the decor so rocks don't keep pushing the shark up and down
+      const b = this.bounds(f, 0, 0);
+      const top = this.obstacles.reduce((m, o) => Math.max(m, o.max.y), 0) + sp.length * (sp.aspect?.h ?? 0.3) * 0.6;
+      return clamp(Math.max(this.zoneY(f, 0, 0, Math.random()), top), b.minY, b.maxY - 0.02);
+    };
+    if (f.lapDir == null) {
+      f.lapDir = Math.random() < 0.5 ? 1 : -1;
+      f.patrolY = pickY();
+      f.patrolT = rand(12, 25);
+    }
+    f.patrolT -= dt;
+    if (f.patrolT <= 0) {
+      f.patrolT = rand(15, 35);
+      f.patrolY = pickY();
+      if (Math.random() < 0.3) f.lapDir *= -1;
+    }
+    const ang = Math.atan2((f.pos.z - cz) / rz, f.pos.x / rx);
+    const a2 = ang + f.lapDir * 0.6;
+    // ease towards the target depth instead of jumping
+    f.curY = f.curY == null ? f.pos.y : lerp(f.curY, f.patrolY, 1 - Math.exp(-dt * 0.15));
+    return tmpG.set(Math.cos(a2) * rx, f.curY, cz + Math.sin(a2) * rz);
+  }
+
   tap(point) {
     for (const f of this.fish) {
       const d = f.pos.distanceTo(point);
@@ -348,8 +545,6 @@ export class FishManager {
   steer(f, dt, t, foods) {
     const sp = f.sp;
     const cruise = sp.speed[0];
-    const burst = sp.speed[1];
-    const steer = tmpV2.set(0, 0, 0);
 
     f.hunger = Math.min(1, f.hunger + dt * 0.012);
     f.goalTimer -= dt;
@@ -429,142 +624,33 @@ export class FishManager {
       if (f.mode === 'swim' || f.mode === 'pause' || f.mode === 'forage' || f.mode === 'rest') this.pickGoal(f);
     }
 
-    // ---- desired velocity
-    let goal = f.goal;
-    if (sp.behavior === 'school' && f.mode !== 'feed') {
-      const sg = this.schoolGoals.get(sp.id);
-      if (sg) goal = sg.goal;
-    }
-    const toGoal = tmpV.copy(goal).sub(f.pos);
-    const dist = toGoal.length();
-    let desiredSpeed = cruise;
-    if (f.mode === 'pause' || f.mode === 'rest') desiredSpeed = 0;
-    else if (f.mode === 'forage') desiredSpeed = cruise * 0.25;
-    else if (f.mode === 'feed') desiredSpeed = lerp(cruise, burst, 0.7);
-    else if (f.mode === 'surface') desiredSpeed = burst * 0.8;
-    if (sp.behavior === 'patrol') desiredSpeed = Math.max(desiredSpeed, cruise);
-    if (sp.behavior !== 'patrol' && f.mode !== 'feed') desiredSpeed *= Math.min(1, dist / 0.08);
-    // individual rhythm
-    desiredSpeed *= 0.85 + 0.3 * Math.sin(t * 0.7 + f.seed);
-
-    if (dist > 1e-4) toGoal.multiplyScalar(desiredSpeed / dist);
-    else toGoal.set(0, 0, 0);
-    if (f.mode === 'forage') {
-      toGoal.x += Math.sin(t * 2.1 + f.seed) * cruise * 0.4;
-      toGoal.z += Math.cos(t * 1.7 + f.seed) * cruise * 0.4;
-    }
-    steer.copy(toGoal).sub(f.vel).multiplyScalar(sp.agility * 0.9);
-
-    // ---- neighbours: separation + schooling
-    let ax = 0, ay = 0, az = 0, cx = 0, cy = 0, cz = 0, nn = 0;
-    const schoolR = sp.behavior === 'school' ? 0.2 : 0.22;
-    for (const o of this.fish) {
-      if (o === f) continue;
-      const dx = f.pos.x - o.pos.x;
-      const dy = f.pos.y - o.pos.y;
-      const dz = f.pos.z - o.pos.z;
-      const d2 = dx * dx + dy * dy + dz * dz;
-      const minD = (f.scale + o.scale) * 0.42;
-      if (d2 < minD * minD && d2 > 1e-8) {
-        const d = Math.sqrt(d2);
-        const k = ((minD - d) / minD) * cruise * 10;
-        steer.x += (dx / d) * k;
-        steer.y += (dy / d) * k * 0.6;
-        steer.z += (dz / d) * k;
-      }
-      if (sp.school > 0 && o.sp === sp && d2 < schoolR * schoolR) {
-        ax += o.vel.x; ay += o.vel.y; az += o.vel.z;
-        cx += o.pos.x; cy += o.pos.y; cz += o.pos.z;
-        nn++;
-      }
-    }
-    if (nn > 0 && f.mode !== 'feed') {
-      const s = sp.school;
-      const coh = sp.behavior === 'school' ? 3.2 : 1.4;
-      steer.x += (ax / nn - f.vel.x) * s * 1.8 + (cx / nn - f.pos.x) * s * coh;
-      steer.y += (ay / nn - f.vel.y) * s * 1.2 + (cy / nn - f.pos.y) * s * coh * 0.8;
-      steer.z += (az / nn - f.vel.z) * s * 1.8 + (cz / nn - f.pos.z) * s * coh;
+    // ---- movement: sharks follow their lap kinematically, everyone else steers
+    const kinematic = sp.behavior === 'patrol' && !feeding && f.flee <= 0;
+    if (kinematic) this.patrolMove(f, dt, t);
+    else {
+      f.pyaw = null;
+      this.freeSwim(f, dt, t);
     }
 
-    // ---- walls (look-ahead)
-    const look = Math.max(0.35, f.scale * 3) * (f.vel.length() / Math.max(cruise, 0.01)) * 0.3 + f.scale * 0.4;
-    const ahead = tmpV.copy(f.dir).multiplyScalar(look).add(f.pos);
-    const b = this.bounds(f, ahead.x, ahead.z);
-    const W = 10;
-    if (ahead.x < b.minX) steer.x += (b.minX - ahead.x) * W;
-    if (ahead.x > b.maxX) steer.x -= (ahead.x - b.maxX) * W;
-    if (ahead.z < b.minZ) steer.z += (b.minZ - ahead.z) * W;
-    if (ahead.z > b.maxZ) steer.z -= (ahead.z - b.maxZ) * W;
-    if (ahead.y < b.minY) steer.y += (b.minY - ahead.y) * W;
-    if (ahead.y > b.maxY) steer.y -= (ahead.y - b.maxY) * W;
-
-    // ---- obstacles (decor boxes)
-    const pad = f.scale * 0.35;
-    for (const o of this.obstacles) {
-      if (
-        ahead.x > o.min.x - pad && ahead.x < o.max.x + pad &&
-        ahead.y > o.min.y - pad && ahead.y < o.max.y + pad &&
-        ahead.z > o.min.z - pad && ahead.z < o.max.z + pad
-      ) {
-        const cxo = (o.min.x + o.max.x) / 2;
-        const czo = (o.min.z + o.max.z) / 2;
-        const px = ahead.x - cxo;
-        const pz = ahead.z - czo;
-        const up = o.max.y + pad - ahead.y;
-        const sideX = (o.max.x - o.min.x) / 2 + pad - Math.abs(px);
-        const sideZ = (o.max.z - o.min.z) / 2 + pad - Math.abs(pz);
-        if (up < sideX && up < sideZ && o.max.y < INNER.maxY - 0.08) steer.y += up * W * 1.2;
-        else if (sideX < sideZ) steer.x += Math.sign(px || 1) * sideX * W;
-        else steer.z += Math.sign(pz || 1) * sideZ * W;
-      }
-    }
-
-    // ---- fleeing
-    let maxSpeed = burst;
-    if (f.flee > 0) {
-      steer.addScaledVector(f.fleeDir, burst * 9 * f.flee);
-      f.flee -= dt;
-      maxSpeed = burst * 1.5;
-    }
-
-    // integrate
-    const maxAcc = burst * sp.agility * 2.5;
-    if (steer.length() > maxAcc) steer.setLength(maxAcc);
-    f.vel.addScaledVector(steer, dt);
-    if (sp.behavior === 'walker' && (f.mode === 'rest' || f.mode === 'pause')) f.vel.multiplyScalar(Math.exp(-dt * 3));
-    const speed = f.vel.length();
-    if (speed > maxSpeed) f.vel.multiplyScalar(maxSpeed / speed);
-    f.pos.addScaledVector(f.vel, dt);
-
-    // hard limits
-    const hb = this.bounds(f, f.pos.x, f.pos.z);
-    const hard = (v, lo, hi, axis) => {
-      if (v < lo) {
-        f.vel[axis] = Math.abs(f.vel[axis]) * 0.3;
-        return lo;
-      }
-      if (v > hi) {
-        f.vel[axis] = -Math.abs(f.vel[axis]) * 0.3;
-        return hi;
-      }
-      return v;
-    };
-    f.pos.x = hard(f.pos.x, hb.minX - 0.02, hb.maxX + 0.02, 'x');
-    f.pos.z = hard(f.pos.z, hb.minZ - 0.02, hb.maxZ + 0.02, 'z');
-    f.pos.y = hard(f.pos.y, hb.minY - 0.004, hb.maxY + 0.01, 'y');
-    const inside = this.insideObstacle(f.pos, -0.002);
-    if (inside) {
-      // push out to the top of the obstacle
-      f.pos.y += (inside.max.y - f.pos.y) * Math.min(1, dt * 4);
-    }
 
     // ---- orientation
     const sp2 = f.vel.length();
     if (sp2 > Math.max(0.006, cruise * 0.12)) {
-      tmpV.copy(f.vel).divideScalar(sp2);
-      tmpV.y = clamp(tmpV.y, -0.55, 0.55);
-      tmpV.normalize();
-      f.dir.lerp(tmpV, 1 - Math.exp(-dt * sp.agility * 2.2)).normalize();
+      const vh = Math.hypot(f.vel.x, f.vel.z);
+      const maxP = f.mode === 'surface' ? 1.0 : sp.maxPitch ?? 0.45;
+      const p = clamp(Math.atan2(f.vel.y, Math.max(vh, 1e-6)), -maxP, maxP);
+      let hx = f.dir.x;
+      let hz = f.dir.z;
+      if (vh > 1e-4) {
+        hx = f.vel.x / vh;
+        hz = f.vel.z / vh;
+      } else {
+        const hl = Math.hypot(hx, hz) || 1;
+        hx /= hl;
+        hz /= hl;
+      }
+      tmpV.set(hx * Math.cos(p), Math.sin(p), hz * Math.cos(p));
+      f.dir.lerp(tmpV, 1 - Math.exp(-dt * (kinematic ? 8 : sp.agility * 2.2))).normalize();
     } else if (f.mode === 'pause' && Math.random() < dt * 0.15) {
       // occasionally turn on the spot
       f.goal.copy(f.pos).add(tmpV.set(rand(-0.1, 0.1), 0, rand(-0.05, 0.05)));
@@ -573,11 +659,13 @@ export class FishManager {
     const dyaw = wrapAngle(yaw - f.yaw) / Math.max(dt, 1e-4);
     f.yaw = yaw;
     f.turn = lerp(f.turn, dyaw, 1 - Math.exp(-dt * 5));
-    let pitch = -Math.asin(clamp(f.dir.y, -0.8, 0.8));
+    const sinMax = Math.sin(f.mode === 'surface' ? 1.0 : sp.maxPitch ?? 0.45);
+    let pitch = -Math.asin(clamp(f.dir.y, -sinMax, sinMax));
     if (f.mode === 'forage') pitch += 0.28;
     if (sp.behavior === 'walker' && f.mode === 'rest') pitch = 0;
     f.pitch = lerp(f.pitch ?? 0, pitch, 1 - Math.exp(-dt * 4));
-    f.roll = lerp(f.roll, clamp(-f.turn * 0.12, -0.45, 0.45), 1 - Math.exp(-dt * 4));
+    const maxRoll = sp.group === 'shark' ? 0.3 : 0.45;
+    f.roll = lerp(f.roll, clamp(-f.turn * 0.12, -maxRoll, maxRoll), 1 - Math.exp(-dt * 4));
 
     // ---- swimming animation
     const rel = clamp(sp2 / cruise, 0, 2);
