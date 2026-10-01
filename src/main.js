@@ -26,6 +26,8 @@ import { createUI } from './ui.js';
 import { rand, lerp, clamp } from './util/noise.js';
 
 const STORE_KEY = 'fishtank:v1';
+// ?lite in the URL starts without heavy effects (troubleshooting / weak GPUs)
+const LITE = new URLSearchParams(location.search).has('lite');
 
 const DEFAULT_STATE = {
   preset: 'reef',
@@ -68,7 +70,8 @@ class App {
     this.stormTimer = 3;
     this.shake = 0;
     this.fpsAcc = { t: 0, n: 0 };
-    this.pixelRatio = Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.5 : 2);
+    this.maxPixelRatio = LITE ? 0.75 : Math.min(window.devicePixelRatio || 1, 1.5);
+    this.pixelRatio = this.maxPixelRatio;
     this.lightColor = new THREE.Color();
     this.audio = new Ambience();
   }
@@ -112,6 +115,12 @@ class App {
     camera.position.z = this.fitDist;
 
     // ---------- loading
+    this.setLoadText('Lade Texturen …');
+    this.slowTimer = setTimeout(() => {
+      const el = document.getElementById('load-text');
+      if (el && document.getElementById('loader'))
+        el.innerHTML = 'Das dauert ungewöhnlich lange … <a href="?lite" style="color:#46d3ff">ohne Effekte starten</a>';
+    }, 25000);
     const manager = new THREE.LoadingManager();
     manager.onProgress = (_url, loaded, total) => this.setProgress(loaded / Math.max(total, 1));
     const texLoader = new THREE.TextureLoader(manager);
@@ -192,10 +201,34 @@ class App {
     this.bindInput(canvas);
 
     this.ui = createUI(this);
+    if (LITE) Object.assign(this.state, { bloom: false, rays: false });
+    this.setLoadText('Lade 3D-Modelle …');
     await this.setPreset(this.state.preset, { restore: true });
     this.applySettings();
-    this.hideLoader();
-    renderer.setAnimationLoop(() => this.frame());
+
+    // Compile all shaders without blocking the page (KHR_parallel_shader_compile),
+    // so the browser stays responsive on drivers with slow compilers.
+    this.setLoadText('Bereite Grafik vor …');
+    this.setProgress(1);
+    try {
+      await Promise.race([renderer.compileAsync(scene, camera), new Promise((r) => setTimeout(r, 15000))]);
+    } catch (e) {
+      console.warn('compileAsync failed', e);
+    }
+    let first = true;
+    renderer.setAnimationLoop(() => {
+      this.frame();
+      if (first) {
+        first = false;
+        clearTimeout(this.slowTimer);
+        this.hideLoader();
+      }
+    });
+  }
+
+  setLoadText(text) {
+    const el = document.getElementById('load-text');
+    if (el) el.textContent = text;
   }
 
   // ------------------------------------------------------------ helpers
@@ -234,6 +267,7 @@ class App {
   }
 
   save() {
+    if (LITE) return;
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => {
       try {
@@ -592,40 +626,52 @@ class App {
     updatePointScale(this.renderer, this.camera);
   }
 
-  adaptQuality(dt) {
+  // Lower the resolution if the GPU can't keep up. Only ever steps down (no
+  // ping-pong between sizes) and ignores the first seconds / hidden tabs.
+  adaptQuality() {
+    const now = performance.now() / 1000;
     const a = this.fpsAcc;
-    a.t += dt;
-    a.n++;
-    if (a.t > 3) {
-      const fps = a.n / a.t;
-      a.t = 0;
+    if (document.hidden) {
+      a.start = null;
+      return;
+    }
+    if (a.start == null) {
+      a.start = now + 5;
       a.n = 0;
-      if (fps < 38 && this.pixelRatio > 0.75) {
-        this.pixelRatio = Math.max(0.75, this.pixelRatio - 0.25);
-        this.onResize();
-      } else if (fps > 58 && this.pixelRatio < Math.min(window.devicePixelRatio || 1, IS_MOBILE ? 1.5 : 2)) {
-        this.pixelRatio = Math.min(this.pixelRatio + 0.25, IS_MOBILE ? 1.5 : 2);
-        this.onResize();
-      }
+      a.low = 0;
+      return;
+    }
+    if (now < a.start) return;
+    a.n++;
+    if (now - a.start < 4) return;
+    const fps = a.n / (now - a.start);
+    a.start = now;
+    a.n = 0;
+    a.low = fps < 30 ? a.low + 1 : 0;
+    if (a.low >= 2 && this.pixelRatio > 0.75) {
+      a.low = 0;
+      this.pixelRatio = Math.max(0.75, this.pixelRatio - 0.25);
+      this.onResize();
     }
   }
 
   // If the frame comes out completely black (broken driver maths), fall back
   // step by step to simpler rendering instead of showing nothing.
+  // Runs only a handful of times after start-up (each check is one readPixels).
   watchdog() {
     const t = performance.now() / 1000;
-    const w = (this.wd ??= { next: t + 2.5, step: 0 });
-    if (t < w.next || w.step > 3) return;
-    w.next = t + 2;
+    const w = (this.wd ??= { next: t + 3, step: 0, checks: 0 });
+    if (t < w.next || w.step > 3 || w.checks >= 4) return;
+    w.next = t + 3;
+    w.checks++;
     const gl = this.renderer.getContext();
-    const px = new Uint8Array(4);
+    const width = gl.drawingBufferWidth;
+    const row = new Uint8Array(width * 4);
+    gl.readPixels(0, Math.floor(gl.drawingBufferHeight * 0.55), width, 1, gl.RGBA, gl.UNSIGNED_BYTE, row);
     let lit = 0;
-    for (let i = 1; i < 6; i++)
-      for (let j = 1; j < 6; j++) {
-        gl.readPixels(Math.floor((gl.drawingBufferWidth * i) / 6), Math.floor((gl.drawingBufferHeight * j) / 6), 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
-        if (px[0] + px[1] + px[2] > 0) lit++;
-      }
+    for (let i = 0; i < row.length; i += 16) lit += row[i] + row[i + 1] + row[i + 2];
     if (lit > 0) return;
+    w.checks = 0;
     w.step++;
     console.warn('FishTank: black frame detected, fallback step', w.step);
     if (w.step === 1) this.set('bloom', false);
@@ -657,7 +703,7 @@ class App {
     this.ui.update?.(dt);
     this.composer.render(dt);
     this.watchdog();
-    this.adaptQuality(dt);
+    this.adaptQuality();
   }
 }
 

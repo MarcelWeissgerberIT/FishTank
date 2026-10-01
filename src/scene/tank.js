@@ -84,7 +84,8 @@ export class Tank {
     spot.target.position.set(0, 0, 0);
     spot.map = caustics.texture;
     spot.castShadow = true;
-    spot.shadow.mapSize.set(isMobile ? 1024 : 2048, isMobile ? 1024 : 2048);
+    const sm = isMobile || /[?&]lite/.test(location.search) ? 1024 : 2048;
+    spot.shadow.mapSize.set(sm, sm);
     spot.shadow.camera.near = 2.6;
     spot.shadow.camera.far = 3.8;
     spot.shadow.bias = -0.0003;
