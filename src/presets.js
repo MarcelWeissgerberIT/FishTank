@@ -16,9 +16,9 @@ export const PRESETS = {
     water: { scatter: '#0d5a8c', absorb: [1.1, 0.32, 0.18] },
     sand: { profile: { base: 0.03, slope: 0.07, dune: 0.006, seed: 2, mounds: [] }, tint: '#fff7ec', skirt: '#cfc6b8' },
     decor: [
-      { id: 'liverock', x: -0.28, z: -0.1, h: 0.3, rot: 0.2 },
-      { id: 'liverock', x: 0.3, z: -0.13, h: 0.24, rot: Math.PI + 0.4, flip: true },
-      { id: 'acropora', x: -0.24, z: -0.08, h: 0.13, rot: 0.6, sink: 0, onTop: 0.26 },
+      { id: 'liverock', x: -0.28, z: -0.1, h: 0.27, rot: 0.2 },
+      { id: 'liverock', x: 0.3, z: -0.13, h: 0.22, rot: Math.PI + 0.4, flip: true },
+      { id: 'acropora', x: -0.24, z: -0.08, h: 0.11, rot: 0.6, sink: 0, onTop: 0.22 },
       { id: 'braincoral', x: 0.15, z: 0.07, h: 0.08, rot: 0.2 },
       { id: 'anemone', x: -0.05, z: 0.02, h: 0.1, rot: 0.3 },
       { id: 'acropora', x: 0.42, z: 0.06, h: 0.12, rot: 2.2 },

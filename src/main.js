@@ -159,6 +159,7 @@ class App {
     this.jellies = new Jellyfish(scene);
     this.fishEnv = this.makeFishEnv();
     this.fish = new FishManager({ scene, loader, substrate: this.substrate, food: this.food, envMap: this.fishEnv });
+    this.fish.viewer = camera.position;
     this.fish.onRemove = (f) => {
       if (this.selected === f) this.selectFish(null);
     };
@@ -466,6 +467,8 @@ class App {
 
   setCamMode(mode) {
     this.camMode = mode;
+    this.followYaw = null;
+    this.followLook = null;
     this.controls.enabled = mode === 'orbit';
     if (mode === 'cinema') this.cine = { t: 0, focus: null, switchT: 0, look: this.controls.target.clone() };
     if (mode === 'follow' && !this.selected) {
@@ -521,16 +524,29 @@ class App {
       if (!f || !this.fish.fish.includes(f)) {
         this.setCamMode('orbit');
       } else {
-        const back = Math.max(0.16, f.scale * 2.4);
-        const side = new THREE.Vector3(-f.dir.z, 0, f.dir.x).normalize();
-        const want = f.pos.clone().addScaledVector(f.dir, -back).addScaledVector(side, back * 0.35);
-        want.y += f.scale * 0.6;
-        want.x = clamp(want.x, INNER.minX + 0.02, INNER.maxX - 0.02);
-        want.z = clamp(want.z, INNER.minZ + 0.02, INNER.maxZ - 0.02);
-        want.y = clamp(want.y, this.substrate.heightAt(want.x, want.z) + 0.02, INNER.maxY - 0.015);
-        cam.position.lerp(want, 1 - Math.exp(-dt * 2.2));
-        if (!this.followLook) this.followLook = f.pos.clone();
-        this.followLook.lerp(f.pos.clone().addScaledVector(f.dir, f.scale * 0.6), 1 - Math.exp(-dt * 4));
+        // chase camera: distance scales with the fish but always fits into the
+        // tank, and the camera swings round slowly when the fish turns
+        const fy = Math.atan2(f.dir.x, f.dir.z);
+        if (this.followYaw == null) this.followYaw = fy;
+        let dy = fy - this.followYaw;
+        while (dy > Math.PI) dy -= Math.PI * 2;
+        while (dy < -Math.PI) dy += Math.PI * 2;
+        this.followYaw += dy * (1 - Math.exp(-dt * 1.3));
+        const fwd = new THREE.Vector3(Math.sin(this.followYaw), 0, Math.cos(this.followYaw));
+        const side = new THREE.Vector3(fwd.z, 0, -fwd.x);
+        const back = clamp(f.scale * 1.7, 0.12, 0.3);
+        const want = f.pos.clone().addScaledVector(fwd, -back).addScaledVector(side, back * 0.4);
+        want.y += f.scale * 0.35 + 0.015;
+        const m = 0.03;
+        want.x = clamp(want.x, INNER.minX + m, INNER.maxX - m);
+        want.z = clamp(want.z, INNER.minZ + m, INNER.maxZ - m);
+        want.y = clamp(want.y, this.substrate.heightAt(want.x, want.z) + 0.03, INNER.maxY - 0.025);
+        const rock = this.fish.insideObstacle(want, 0.01);
+        if (rock) want.y = Math.min(INNER.maxY - 0.025, rock.max.y + 0.04);
+        cam.position.lerp(want, 1 - Math.exp(-dt * 2));
+        const look = f.pos.clone().addScaledVector(f.dir, f.scale * 0.4);
+        if (!this.followLook) this.followLook = look.clone();
+        this.followLook.lerp(look, 1 - Math.exp(-dt * 3));
         cam.lookAt(this.followLook);
       }
     }
